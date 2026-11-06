@@ -1,0 +1,27 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout kod
+        uses: actions/checkout@v4
+        
+      - name: Pokretanje Docker Compose-a
+        run: docker compose up --build -d
+        
+      - name: Pokretanje Healthcheck skripte
+        run: |
+          chmod +x ./scripts/healthcheck.sh
+          ./scripts/healthcheck.sh http://localhost:5000
+          
+      - name: Docker logovi za debagovanje
+        if: failure()
+        run: docker compose logs
