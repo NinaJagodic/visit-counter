@@ -25,3 +25,12 @@ jobs:
       - name: Docker logovi za debagovanje
         if: failure()
         run: docker compose logs
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'visit-counter:latest'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
