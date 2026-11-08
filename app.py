@@ -22,8 +22,9 @@ def home():
 def visits():
     try:
         count = db.incr("visits")
-    except redis.ConnectionError:
-        count = 0
+    except redis.exceptions.RedisError as exc:
+        app.logger.error("Redis nedostupan: %s", exc)
+        return jsonify(status="error"), 503
     return jsonify(visits=count)
 
 
