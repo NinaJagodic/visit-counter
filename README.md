@@ -1,4 +1,12 @@
-# visit-counter
+# Brojač poseta (visit-counter)
+
+[![CI Pipeline](https://github.com/NinaJagodic/visit-counter/actions/workflows/ci.yml/badge.svg)](https://github.com/NinaJagodic/visit-counter/actions/workflows/ci.yml)
+
+Mala Flask aplikacija koja broji posete i čuva brojač u Redis bazi. Spakovana je u Docker, pokreće se preko Docker Compose-a sa Nginx reverse proxy-jem i dve instance aplikacije, a CI pipeline (GitHub Actions) radi lint, testove, build, bezbednosno skeniranje i objavljivanje image-a na ghcr.io. Postoje i manifesti za Kubernetes (kind).
+
+## Arhitektura
+
+```
                     +---------------------------------------------+
                     |               Docker mreža                  |
                     |                                             |
@@ -15,24 +23,14 @@
                     |         |               |                   |
                     |         +-------+-------+                   |
                     |                 v                           |
-                    |            +---------+      +----------+    |
-                    |            |  Redis  |----->| redis_data|   |
-                    |            +---------+      |  (volume) |   |
-                    |                             +----------+    |
+                    |            +---------+     +-----------+    |
+                    |            |  Redis  |---->| redis_data|    |
+                    |            +---------+     |  (volume) |    |
+                    |                            +-----------+    |
                     +---------------------------------------------+
+```
 
-# Brojač poseta (visit-counter)
-
-[![CI Pipeline](https://github.com/NinaJagodic/visit-counter/actions/workflows/ci.yml/badge.svg)]
-(https://github.com/NinaJagodic/visit-counter/actions/workflows/ci.yml)
-
-Mala Flask aplikacija koja broji posete i čuva brojač u Redis bazi. Spakovana je u Docker, pokreće se preko Docker Compose-a sa Nginx reverse 
-proxy-jem i dve instance aplikacije, a CI pipeline (GitHub Actions) radi lint, testove, build, bezbednosno skeniranje i objavljivanje image-a na 
-ghcr.io.
-
-## Arhitektura
-
-(ovde nalepi ASCII dijagram odozgo)
+Spolja je dostupan samo port 5000 (Nginx). `web` i `redis` nisu izloženi ka host mašini.
 
 ## Endpointi
 
@@ -48,6 +46,7 @@ ghcr.io.
 - Docker Desktop (sa Docker Compose)
 - (opciono) Python 3.12, za lokalno pokretanje testova i linter-a
 - (opciono) `make`, za prečice iz Makefile-a
+- (opciono) `kind` i `kubectl`, za Kubernetes deo
 
 ## Pokretanje
 
@@ -78,7 +77,7 @@ Zaustavljanje: `docker compose down` (podaci u volume-u ostaju). Sa `-v` se bri�
 bash scripts/healthcheck.sh http://localhost:5000
 ```
 
-Proverava `/health` do 5 puta sa pauzom od 3 sekunde. Izlazni kod 0 znači da je aplikacija zdrava, a 1 da nije.
+Proverava `/health` do 5 puta sa pauzom od 3 sekunde i loguje svaki pokušaj sa vremenom. Izlazni kod 0 znači da je aplikacija zdrava, a 1 da nije zdrava ni posle 5 pokušaja. Bez argumenta ispisuje uputstvo i vraća 1.
 
 ## Konfiguracija
 
@@ -103,33 +102,47 @@ Preko promenljivih okruženja (`.env`): `APP_PORT`, `REDIS_HOST`, `REDIS_PORT`. 
 
 ## CI pipeline
 
-Na svaki push i pull request ka `main`: checkout, instalacija zavisnosti, linter (ruff), testovi (pytest), build Docker image-a, Trivy skeniranje,
-podizanje Compose okruženja i healthcheck. Na push u `main` image se objavljuje na ghcr.io sa tagom SHA commit-a.
+Na svaki push i pull request ka `main`: checkout, instalacija zavisnosti, linter (ruff), testovi (pytest), build Docker image-a, Trivy skeniranje, podizanje Compose okruženja i healthcheck. Na push u `main` image se objavljuje na ghcr.io sa tagom SHA commit-a.
+
+## Kubernetes (lokalni klaster, kind)
+
+Manifesti su u folderu `k8s/`: ConfigMap (`configmap.yaml`), Redis Deployment i Service (`redis.yaml`), aplikacija sa 2 replike i NodePort Service (`app.yaml`).
+
+```bash
+kind create cluster --name visit-counter
+docker build -t visit-counter:latest .
+kind load docker-image visit-counter:latest --name visit-counter
+kubectl apply -f k8s/
+kubectl get pods
+kubectl port-forward service/visit-counter 8081:5000
+curl http://localhost:8081/visits
+```
+
+Konfiguracija se čita iz ConfigMap-a (`envFrom`). `readinessProbe` na `/health` radi kao healthcheck. Image se učitava u klaster sa `kind load docker-image`, jer kind ne vidi lokalne Docker slike, pa je postavljen `imagePullPolicy: IfNotPresent`. Brisanje klastera: `kind delete cluster --name visit-counter`.
 
 ## Bonus zadaci
 
 - Multi-stage build
 - Objavljivanje image-a na ghcr.io (SHA tag)
 - Nginx reverse proxy sa 2 instance
+- Kubernetes (kind): Deployment, Service i ConfigMap manifesti
 - Bezbednosno skeniranje (Trivy)
 - Makefile
 
 ## Problemi na koje sam naišla
 
-- **`make` nije prepoznat u PowerShell-u:** Windows ga nema podrazumevano. Instalirala sam ga preko winget-a i ponovo otvorila terminal da se učita
-PATH.
+- **`make` nije prepoznat u PowerShell-u:** Windows ga nema podrazumevano. Instalirala sam ga preko winget-a i ponovo otvorila terminal da se učita PATH.
 - **`bash` iz PowerShell-a:** pokretao je WSL bez distribucije. Skriptu pokrećem preko Git Bash-a.
 - **Docker nije mogao da pročita Dockerfile:** PowerShell `>` snima UTF-16, pa sam koristila `Out-File -Encoding ascii`.
-- **Linter:** ruff je prijavio nesortirane importe, podrazumevane vrednosti u `os.getenv` koje nisu stringovi i `except Exception: pass` koji je
-krio greške. Ispravila sam kod i dodala logovanje greške.
+- **Linter:** ruff je prijavio nesortirane importe, podrazumevane vrednosti u `os.getenv` koje nisu stringovi i `except Exception: pass` koji je krio greške. Ispravila sam kod i dodala logovanje greške.
 - **Trivy nije našao image:** Compose daje drugačije ime slici, pa sam image gradila posebno pod imenom `visit-counter:latest`, pre skeniranja.
 - **ghcr.io odbija velika slova:** korisničko ime ima velika slova, pa se ime image-a pretvara u mala slova u pipeline-u.
-- **Nginx je slao sav saobraćaj na jednu instancu:** razrešavao je ime `web` samo pri startu. Rešeno je Docker DNS resolver-om (`127.0.0.11`) i 
-razrešavanjem imena pri svakom zahtevu.
+- **Nginx je slao sav saobraćaj na jednu instancu:** razrešavao je ime `web` samo pri startu. Rešeno je Docker DNS resolver-om (`127.0.0.11`) i razrešavanjem imena pri svakom zahtevu.
+- **kind čvor je bio `NotReady`:** posle kreiranja klastera trebalo mu je minut-dva da postane `Ready`.
 
 ## Šta bih unapredila da imam više vremena
 
-- Kubernetes manifesti (Deployment, Service, ConfigMap) za lokalni klaster
+- Redis u Kubernetes-u nema trajni volume (PersistentVolumeClaim), pa brojač nestaje pri restartu poda
 - Healthcheck i za `web` servis u Compose-u
 - Trivy da obara pipeline na HIGH/CRITICAL ranjivosti (sada samo izveštava)
 - Fiksirane verzije GitHub Actions umesto `trivy-action@master`
@@ -138,6 +151,6 @@ razrešavanjem imena pri svakom zahtevu.
 ## Korišćeni alati
 
 - **Gemini:** početna postavka projekta.
-- **Claude:** objašnjenja, ispravke grešaka i pomoć oko pipeline-a i Nginx-a.
+- **Claude:** objašnjenja, ispravke grešaka i pomoć oko pipeline-a, Nginx-a i Kubernetes-a.
 - **Zvanične skripte sa predmeta ITEH (FON):** učenje Docker-a i Git-a.
-- Zvanična dokumentacija (Docker, GitHub Actions, Nginx).
+- Zvanična dokumentacija (Docker, GitHub Actions, Nginx, Kubernetes).
