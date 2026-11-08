@@ -13,15 +13,46 @@ jobs:
     steps:
       - name: Checkout kod
         uses: actions/checkout@v4
-        
+
+      - name: Podesi Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Instaliraj zavisnosti
+        run: |
+          pip install -r requirements.txt
+          pip install ruff pytest
+
+      - name: Linter (ruff)
+        run: ruff check .
+
+      - name: Testovi (pytest)
+        run: pytest
+
+      - name: Build Docker image
+        run: docker build -t visit-counter:latest .
+
+      - name: Trivy skeniranje
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'visit-counter:latest'
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '0'
+
       - name: Pokretanje Docker Compose-a
-        run: docker compose up --build -d
-        
-      - name: Pokretanje Healthcheck skripte
+        run: |
+          cp .env.example .env
+          docker compose up --build -d
+
+      - name: Healthcheck skripta
         run: |
           chmod +x ./scripts/healthcheck.sh
           ./scripts/healthcheck.sh http://localhost:5000
-          
+
       - name: Docker logovi za debagovanje
         if: failure()
         run: docker compose logs
